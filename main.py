@@ -4,7 +4,7 @@ import random
 import serial
 
 try:
-    ser = serial.Serial('/dev/cu.usbmodem12301', 9600, timeout=0.1)
+    ser = serial.Serial('/dev/cu.usbmodem12301', 115200, timeout=0)
 except (OSError, serial.SerialException):
     ser = None
 
@@ -134,6 +134,9 @@ class Cloud:
 
 
 class Obstacle:
+    hitbox_inflate_x = 0
+    hitbox_inflate_y = 0
+
     def __init__(self, image, type):
         self.image = image
         self.type = type
@@ -150,6 +153,9 @@ class Obstacle:
 
 
 class SmallCactus(Obstacle):
+    hitbox_inflate_x = -30
+    hitbox_inflate_y = -30
+
     def __init__(self, image):
         self.type = random.randint(0, 2)
         super().__init__(image, self.type)
@@ -157,6 +163,9 @@ class SmallCactus(Obstacle):
 
 
 class LargeCactus(Obstacle):
+    hitbox_inflate_x = -60
+    hitbox_inflate_y = -60
+
     def __init__(self, image):
         self.type = random.randint(0, 2)
         super().__init__(image, self.type)
@@ -164,6 +173,9 @@ class LargeCactus(Obstacle):
 
 
 class Bird(Obstacle):
+    hitbox_inflate_x = -12
+    hitbox_inflate_y = -12
+
     def __init__(self, image):
         self.type = 0
         super().__init__(image, self.type)
@@ -177,19 +189,18 @@ class Bird(Obstacle):
         self.index += 1
 
 
-def main():
+def main(death_count):
     global game_speed, x_pos_bg, y_pos_bg, points, obstacles
     run = True
     clock = pygame.time.Clock()
     player = Dinosaur()
-    cloud = Cloud()
+    clouds = [Cloud(), Cloud(), Cloud(), Cloud()]
     game_speed = 20
     x_pos_bg = 0
     y_pos_bg = 380
     points = 0
     font = pygame.font.Font('freesansbold.ttf', 20)
     obstacles = []
-    death_count = 0
     prev_jump = 0
     prev = 0
     last_serial = None
@@ -220,6 +231,9 @@ def main():
             if event.type == pygame.QUIT:
                 run = False
 
+        if not run:
+            break
+
         SCREEN.fill((255, 255, 255))
         keyboard_input = pygame.key.get_pressed()
         userInput = {pygame.K_UP: bool(keyboard_input[pygame.K_UP]),
@@ -227,23 +241,24 @@ def main():
 
         if ser is not None:
             try:
-                while ser.in_waiting > 0:
-                    line = ser.readline().decode('utf-8', errors='ignore').strip()
-                    if not line:
-                        continue
-                    parts = [part.strip() for part in line.split(',')]
-                    if len(parts) == 2 and all(part in ('0', '1') for part in parts):
-                        left_button, right_button = map(int, parts)
-                        if last_serial != (left_button, right_button):
-                            last_serial = (left_button, right_button)
-                            print(f"SERIAL -> L={left_button} R={right_button}")
-                        # left button = jump, right button = duck
-                        if left_button == 1 and prev_jump == 0:
-                            userInput[pygame.K_UP] = True
-                        if right_button == 0:
-                            userInput[pygame.K_DOWN] = True
-                        prev_jump = left_button
-                        prev = right_button
+                if ser.in_waiting:
+                    data = ser.read(ser.in_waiting).decode('utf-8', errors='ignore')
+                    for line in data.splitlines():
+                        if not line:
+                            continue
+                        parts = [part.strip() for part in line.split(',')]
+                        if len(parts) == 2 and all(part in ('0', '1') for part in parts):
+                            left_button, right_button = map(int, parts)
+                            if last_serial != (left_button, right_button):
+                                last_serial = (left_button, right_button)
+                                print(f"SERIAL -> L={left_button} R={right_button}")
+                            # left button = jump, right button = duck
+                            if left_button == 1 and prev_jump == 0:
+                                userInput[pygame.K_UP] = True
+                            if right_button == 0:
+                                userInput[pygame.K_DOWN] = True
+                            prev_jump = left_button
+                            prev = right_button
             except (TypeError, ValueError, UnicodeDecodeError, serial.SerialException):
                 pass
 
@@ -261,15 +276,16 @@ def main():
         for obstacle in obstacles:
             obstacle.draw(SCREEN)
             obstacle.update()
-            if player.dino_rect.colliderect(obstacle.rect.inflate(-30, -30)):
-                pygame.time.delay(2000)
-                death_count += 1
-                menu(death_count)
+            if player.dino_rect.colliderect(obstacle.rect.inflate(obstacle.hitbox_inflate_x, obstacle.hitbox_inflate_y)):
+                pygame.time.delay(1000)
+                return death_count + 1
 
         background()
 
-        cloud.draw(SCREEN)
-        cloud.update()
+        for cloud in clouds:
+            cloud.draw(SCREEN)
+            cloud.draw(SCREEN)
+            cloud.update()
 
         score()
 
@@ -280,7 +296,7 @@ def main():
 def menu(death_count):
     global points
     run = True
-    while run:
+    while run and pygame.display.get_surface() is not None:
         SCREEN.fill((255, 255, 255))
         font = pygame.font.Font('freesansbold.ttf', 30)
 
@@ -292,6 +308,10 @@ def menu(death_count):
             scoreRect = score.get_rect()
             scoreRect.center = (SCREEN_WIDTH // 2, SCREEN_HEIGHT // 2 + 50)
             SCREEN.blit(score, scoreRect)
+            deaths = font.render("Deaths: " + str(death_count), True, (0, 0, 0))
+            deathsRect = deaths.get_rect()
+            deathsRect.center = (SCREEN_WIDTH // 2, SCREEN_HEIGHT // 2 + 80)
+            SCREEN.blit(deaths, deathsRect)
         textRect = text.get_rect()
         textRect.center = (SCREEN_WIDTH // 2, SCREEN_HEIGHT // 2)
         SCREEN.blit(text, textRect)
@@ -300,9 +320,30 @@ def menu(death_count):
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
                 pygame.quit()
-                run = False
+                return False
             if event.type == pygame.KEYDOWN:
-                main()
+                return True
+
+        if ser is not None:
+            try:
+                if ser.in_waiting:
+                    data = ser.read(ser.in_waiting).decode('utf-8', errors='ignore')
+                    for line in data.splitlines():
+                        parts = [part.strip() for part in line.split(',')]
+                        if len(parts) == 2 and all(part in ('0', '1') for part in parts):
+                            left_button, right_button = map(int, parts)
+                            if left_button == 0 or right_button == 0:
+                                return True
+            except (TypeError, ValueError, UnicodeDecodeError, serial.SerialException):
+                pass
+    return False
 
 
-menu(death_count=0)
+death_count = 0
+while True:
+    if not menu(death_count):
+        break
+    result = main(death_count)
+    if result is None:
+        break
+    death_count = result

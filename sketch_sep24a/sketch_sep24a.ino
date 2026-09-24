@@ -2,7 +2,7 @@ const int BTN_LEFT = 3;
 const int BTN_RIGHT = 2;
 
 void setup() {
-  Serial.begin(9600);
+  Serial.begin(115200);
   pinMode(BTN_LEFT, INPUT_PULLUP);
   pinMode(BTN_RIGHT, INPUT_PULLUP);
 }
@@ -17,4 +17,5 @@ void loop() {
   Serial.print(",");
   Serial.println(rightState);
 
+  delay(10);
 }
